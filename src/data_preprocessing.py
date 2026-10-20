@@ -4,7 +4,6 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 
 def download_data(save_path=None):
-    # Determine project root dynamically based on this file's location
     if save_path is None:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.abspath(os.path.join(current_dir, '..'))
@@ -46,10 +45,14 @@ def preprocess_data(df_or_path=None):
     for col in df.select_dtypes(include=[np.number]).columns:
         df[col] = df[col].fillna(df[col].median())
 
-    # 2. Binarize target: 0 = No disease, 1,2,3,4 = Disease present
+    # 2. Binarize target: 0 = No disease, 1-4 = Disease present
     df['target'] = df['target'].apply(lambda x: 1 if x > 0 else 0)
     
-    # 3. Save cleaned dataset to processed folder
+    # 3. Encode categorical features (One-Hot Encoding for nominal variables)
+    categorical_cols = ['cp', 'restecg', 'slope', 'thal']
+    df = pd.get_dummies(df, columns=categorical_cols, drop_first=True, dtype=int)
+
+    # 4. Save cleaned and encoded dataset to processed folder
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(current_dir, '..'))
     processed_dir = os.path.join(project_root, "data", "processed")
@@ -57,9 +60,9 @@ def preprocess_data(df_or_path=None):
     
     processed_path = os.path.join(processed_dir, "heart_cleaned.csv")
     df.to_csv(processed_path, index=False)
-    print(f"Cleaned dataset successfully saved to: {processed_path}")
+    print(f"Cleaned and encoded dataset successfully saved to: {processed_path}")
     
-    # 4. Split into train/test sets
+    # 5. Split into train/test sets
     X = df.drop(columns=['target'])
     y = df['target']
     

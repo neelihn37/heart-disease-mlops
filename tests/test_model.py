@@ -12,4 +12,4 @@ def test_preprocessing_shapes():
     X_train, X_test, y_train, y_test = preprocess_data(df)
     assert len(X_train) > 0
     assert len(X_test) > 0
-    assert len(X_train.columns) == 13
+    assert len(X_train.columns) == 18, f"Expected 18 columns after one-hot encoding, got {len(X_train.columns)}"

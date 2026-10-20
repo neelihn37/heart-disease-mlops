@@ -10,13 +10,18 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+
 ROOT = Path(__file__).resolve().parents[2]
-MODEL_PATH = Path(os.environ.get("MODEL_PATH", str(ROOT / "artifacts" / "model.joblib")))
+MODEL_PATH = Path(os.environ.get("MODEL_PATH", str(ROOT / "models" / "random_forest_model.joblib")))
+
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("heartml-api")
+
+# Prometheus Metrics
 REQUESTS = Counter("api_requests_total", "API requests", ["method", "endpoint", "status"])
 LATENCY = Histogram("api_request_latency_seconds", "API request latency", ["endpoint"])
 PREDICTIONS = Counter("model_predictions_total", "Predictions returned", ["prediction"])
+
 model = None
 
 @asynccontextmanager
@@ -30,11 +35,34 @@ async def lifespan(app: FastAPI):
         logger.error(json.dumps({"event": "model_missing", "path": str(MODEL_PATH)}))
     yield
 
-app = FastAPI(title="Heart Disease Classifier API", version="1.0.1",
-              description="Educational demo only; not for clinical use.", lifespan=lifespan)
+app = FastAPI(
+    title="Heart Disease Classifier API",
+    version="1.0.1",
+    description="MLOps model serving API with Prometheus monitoring and automated sample data.",
+    lifespan=lifespan
+)
 
 class PatientFeatures(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "age": 52.0,
+                "sex": 1.0,
+                "cp": "1.0",
+                "trestbps": 125.0,
+                "chol": 212.0,
+                "fbs": "0.0",
+                "restecg": "1.0",
+                "thalach": 168.0,
+                "exang": "0.0",
+                "oldpeak": 1.0,
+                "slope": "2.0",
+                "ca": "2.0",
+                "thal": "3.0"
+            }
+        }
+    )
     age: float
     sex: str | float
     cp: str | float
@@ -51,7 +79,8 @@ class PatientFeatures(BaseModel):
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    started = time.perf_counter(); status = 500
+    started = time.perf_counter()
+    status = 500
     try:
         response = await call_next(request)
         status = response.status_code
@@ -61,8 +90,13 @@ async def log_requests(request: Request, call_next):
         endpoint = request.url.path
         REQUESTS.labels(request.method, endpoint, str(status)).inc()
         LATENCY.labels(endpoint).observe(elapsed)
-        logger.info(json.dumps({"event": "http_request", "method": request.method,
-            "path": endpoint, "status": status, "latency_seconds": round(elapsed, 6)}))
+        logger.info(json.dumps({
+            "event": "http_request",
+            "method": request.method,
+            "path": endpoint,
+            "status": status,
+            "latency_seconds": round(elapsed, 6)
+        }))
 
 @app.get("/health")
 def health():
@@ -72,8 +106,10 @@ def health():
 
 @app.get("/schema")
 def schema():
-    return {"required_features": list(PatientFeatures.model_fields),
-            "target": "binary educational label; 0=absent, 1=present in source data"}
+    return {
+        "required_features": list(PatientFeatures.model_fields),
+        "target": "binary educational label; 0=absent, 1=present in source data"
+    }
 
 @app.post("/predict")
 def predict(patient: PatientFeatures):
@@ -87,12 +123,16 @@ def predict(patient: PatientFeatures):
         probabilities = model.predict_proba(X)[0]
         positive_probability = float(probabilities[list(model.classes_).index(1)])
         confidence = float(max(probabilities))
+        
         PREDICTIONS.labels(str(prediction)).inc()
-        return {"prediction": prediction,
+        
+        return {
+            "prediction": prediction,
             "label": "disease_present" if prediction == 1 else "disease_absent",
             "confidence": round(confidence, 4),
             "positive_class_probability": round(positive_probability, 4),
-            "disclaimer": "Educational output only; not a diagnosis or calibrated clinical risk."}
+            "disclaimer": "Educational output only; not a diagnosis or calibrated clinical risk."
+        }
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
